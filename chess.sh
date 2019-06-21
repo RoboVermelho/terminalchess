@@ -84,7 +84,8 @@ function tabuleiro_inicial() {
   TAB[57]=$W_ROOK
   TAB[58]=$W_KNIGHT
   TAB[59]=$W_BISHOP
-  TAB[60]=$W_QUEEN
+  #TAB[60]=$W_QUEEN
+  TAB[46]=$W_QUEEN
   TAB[61]=$W_KING
   TAB[62]=$W_BISHOP
   TAB[63]=$W_KNIGHT
@@ -156,20 +157,318 @@ recebe_movimento() {
   #rei da posição de xeque, é definido o xeque-mate.
   #Correção dos métodos: verificar sempre se a casa destino é uma casa em
   #branco ou se é uma casa das peças inimigas.
+  #
+  #Para refatorar as casas, para que elas apenas testem se o movimento é
+  #possível, os métodos podem retornar 0 se impossível, e entre 1 e 64 para
+  #a casa origem. Para depois limpar a casa origem, e mover a peça para a
+  #casa destino.
   if [[ ${#MOV} == 2 ]]; then #Peão
     teste_mov_peao $MOV
+    cs_orig=$?
   elif [[ ${MOV:0:1} == "R" ]]; then #Torre
     teste_mov_torre $MOV
+    cs_orig=$?
   elif [[ ${MOV:0:1} == "N" ]]; then #Cavalo
-    $MOV
+    teste_mov_cavalo $MOV
+    cs_orig=$?
   elif [[ ${MOV:0:1} == "B" ]]; then #Bispo
     teste_mov_bispo $MOV
+    cs_orig=$?
   elif [[ ${MOV:0:1} == "Q" ]]; then #Dama
-    $MOV
+    teste_mov_dama $MOV
+    cs_orig=$?
   elif [[ ${MOV:0:1} == "K" ]]; then #Rei
-    $MOV
+    teste_mov_rei $MOV
+    cs_orig=$?
   fi
-  num_col=${cols[${MOV:0:1}]}
+}
+
+
+#Teste do movimento do rei. Neste movimento, o rei pode andar apenas uma
+#casa, em qualquer direção, porém a casa não pode estar em cheque, o mais
+#complicado é verificar se a casa está em cheque.
+#O mais simples é verificar se existem peças com movimentos permitidos que
+#podem dar cheque ou seja:
+#Peões: diagonais superiores.
+#Torre: se está na mesma coluna ou mesma linha e não há peças no meio do
+#caminho.
+#Cavalo:  -2 colunas e (+-) 1 linha, +2 linhas e (+-)  linha
+#-2 linhas e (+-) 1 coluna e  +2 linhas e (+-) 1 coluna.
+#Bispo: na diagonal da casa (mesma diferença de colunas e linhas e casas
+#vazias no caminho.
+#Dama: o mesmo de torre e peão.
+#Se a casa pretendida estiver em cheque o rei não pode se mover para a casa.
+#Rei: todas as casas a uma casa de distância.
+teste_mov_rei() {
+  declare -A cols
+  cols=([A]=1 [B]=2 [C]=3 [D]=4 [E]=5 [F]=6 [G]=7 [H]=8)
+  num_col=${cols[${MOV:1:1}]}
+  num_lin=${MOV:2:1}
+  posicao=$((64-${MOV:2:1}*8 + $num_col))
+  printf "Posicao base: $posicao  \n"
+  pos_base=""
+  mov_valido=0
+
+  if [[ $TURNO == "W" ]]; then
+    peca="$W_KING"
+    inimigos=${PECAS_PRETAS[@]}
+    amigos=${PECAS_BRANCAS[@]}
+  else
+    peca="$B_KING"
+    amigos=${PECAS_PRETAS[@]}
+    inimigos=${PECAS_BRANCAS[@]}
+  fi
+  printf "Conteudo posicao: ${TAB[$posicao]} \n"
+  posicao_disponivel "$amigos" "${TAB[$posicao]}"
+  pos_disponivel=$?
+  echo "Posicao disponivel -> $pos_disponivel"
+  if [[ $pos_disponivel -eq 0 ]]; then
+    printf "Movimento inválido - casa destino ocupada \n"
+    return
+  fi
+
+  #Distâncias relativas: -9 -8 -7 -1 1 7 8 9
+  posicoes=(-9 -8 -7 -1 1 7 8 9)
+  dist=0 #Distancia está ok ou não
+  for ((i=0; i < 8; i++)) do
+    casa=$(($posicao + ${posicoes[$i]}))
+    if [[ "${TAB[$casa]}" == "$peca" ]]; then
+      pos_base=$casa
+      dist=1
+      break
+    fi
+  done
+
+  if [[ $dist -eq 0 ]]; then
+    printf "Posicao impossivel - distancia incorreta \n"
+    return
+  fi
+
+  posicao_em_xeque $posicao
+  pos_xeque=$?
+
+  if [[ $pos_xeque -eq 0 ]]; then
+    TAB[$pos_base]=""
+    TAB[$posicao]="$peca"
+    troca_turno
+  else
+    printf "Movimento impossivel - casa em xeque \n"
+  fi
+}
+
+#Verifica se uma posicao do tabuleiro esta em xeque.
+#Posso utilizar todos os testes das outras peças, mas para isso vou precisar
+#refatorar o código, para que fique mais modular. Simplesmente, vou testar a
+#movimentação de cada peça para a casa pretendida.
+#Parametros: $1 -> casa que vai ser verificada.
+posicao_em_xeque() {
+  posicao="$1"
+
+
+
+}
+
+#Verifica se a posição em questão está disponível para ser usada, ou seja, a
+#casa não está ocupada por um dos reis ou por uma peça aliada.
+#Retorna 1 se disponível e 0 se não disponível.
+#Parâmetros: $2 -> lista de peças aliadas.
+#$3 -> posição a ser verificada
+posicao_disponivel() {
+  existe_na_posicao "$1" "$2"
+  casa_tomada=$?
+  if [[ $casa_tomada -eq 1  ||
+      "${TAB[$posicao]}" == "$B_KING" ||
+      "${TAB[$posicao]}" == "$W_KING" ]]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+
+#Teste de movimentação para a dama: ela se move quantas casas quiser, na
+#direção que quiser, só não pula casas.
+teste_mov_dama() {
+  declare -A cols
+  cols=([A]=1 [B]=2 [C]=3 [D]=4 [E]=5 [F]=6 [G]=7 [H]=8)
+  num_col=${cols[${MOV:1:1}]}
+  num_lin=${MOV:2:1}
+  posicao=$((64-${MOV:2:1}*8 + $num_col))
+  printf "Posicao base: $posicao  \n"
+  pos_base=""
+  mov_valido=0
+
+  if [[ $TURNO == "W" ]]; then
+    peca="$W_QUEEN"
+    inimigos=${PECAS_PRETAS[@]}
+    amigos=${PECAS_BRANCAS[@]}
+  else
+    peca="$B_QUEEN"
+    amigos=${PECAS_PRETAS[@]}
+    inimigos=${PECAS_BRANCAS[@]}
+  fi
+  printf "Conteudo posicao: ${TAB[$posicao]} \n"
+  posicao_disponivel "$amigos" "${TAB[$posicao]}"
+  pos_disponivel=$?
+  echo "Posicao disponivel -> $pos_disponivel"
+  if [[ $pos_disponivel -eq 0 ]]; then
+    printf "Movimento inválido - casa destino ocupada \n"
+    return
+  fi
+
+  #Movimento horizontal ->
+  itr_tst=$(($num_col+1))
+  while [ $itr_tst -lt 9 ]; do
+
+    pos_tst=$(($posicao + $itr_tst))
+    if [[ "${TAB[$pos_tst]}" == "$peca" ]]; then
+      pos_base=$pos_tst
+      mov_valido=1
+      break
+    elif [[ "${TAB[$pos_tst]}" != "" ]]; then
+      mov_valido=0
+      break
+    fi
+    itr_tst=$(($itr_tst+1))
+  done
+  printf "Movimento: $mov_valido \n"
+
+  #Movimento horizontal <--
+  if [[ $mov_valido -eq 0 ]]; then
+    itr_tst=$(($num_col-1))
+    while [ $itr_tst -gt 0 ]; do
+      pos_tst=$(($posicao - $itr_tst))
+      if [[ "${TAB[$pos_tst]}" == "$peca" ]]; then
+        pos_base=$pos_tst
+        mov_valido=1
+        break
+      elif [[ "${TAB[$pos_tst]}" != "" ]]; then
+        mov_valido=0
+        break
+      fi
+    done
+    itr_tst=$(($itr_tst-1))
+  fi
+
+  #Teste de movimentos - Vertical
+  if [[ $mov_valido -eq 0 ]]; then
+    pos_tst=$(( $posicao + 8))
+    while [ $pos_tst -lt 65 ]; do
+      if [[ "${TAB[$pos_tst]}" == "$peca" ]]; then
+        pos_base=$pos_tst
+        mov_valido=1
+        break
+      elif [[ "${TAB[$pos_tst]}" != "" ]]; then
+        mov_valido=0
+        break
+      fi
+      pos_tst=$(( $pos_tst + 8))
+    done
+  fi
+
+  if [[ $mov_valido -eq 0 ]]; then
+   pos_tst=$(( $posicao - 8))
+   while [ $pos_tst > 0 ]; do
+      if [[ "${TAB[$pos_tst]}" == "$peca" ]]; then
+        pos_base=$pos_tst
+        mov_valido=1
+        break
+      elif [[ "${TAB[$pos_tst]}" != "" ]]; then
+        mov_valido=0
+        break
+      fi
+      pos_tst=$(( $pos_tst - 8))
+    done
+  fi
+
+  if [[ $mov_valido -eq 0 ]]; then
+    diag_col=(-1 -1 1  1)
+    diag_lin=(-1  1 1 -1)
+    iteradores=(7 -7 -9 9)
+    for ((a=0; a < 4; a++)) do
+      col_itr=${diag_col[$a]}
+      lin_itr=${diag_lin[$a]}
+      col_tst=$(($num_col + ${diag_col[$a]}))
+      lin_tst=$(($num_lin + ${diag_lin[$a]}))
+      itr=${iteradores[$a]}
+      pos_tst=$(($posicao + $itr))
+      while [[ $col_tst -gt 0  &&  $col_tst -lt 9  &&  $lin_tst -gt 0  &&
+               $lin_tst -lt 9 ]]; do
+        if [[ "${TAB[$pos_tst]}" == "$peca" ]]; then
+          pos_base=$pos_tst
+          mov_valido=1
+          break
+        elif [[ "${TAB[$pos_tst]}" != "" ]]; then
+          mov_valido=0
+          printf "Casa ocupada \n"
+          break
+        fi
+        col_tst=$(($col_tst + $col_itr))
+        lin_tst=$(($lin_tst + $lin_itr))
+        pos_tst=$((pos_tst + $itr))
+      done #Fim while.
+        if [[ $mov_valido -eq 1 ]]; then
+          break
+        fi
+    done
+  fi
+
+  if [[ $mov_valido -eq 1 ]]; then
+    TAB[$pos_base]=""
+    TAB[$posicao]="$peca"
+    troca_turno
+  else
+    printf "Movimento impossivel \n"
+  fi
+}
+
+#Método que analisa a movimentação do cavalo (Knight). Para isso deve ser
+#checado se existe um cavalo na posição em uma combinação de 2 colunas e 1
+#linha ou vice-versa, positivo ou negativo. Não é preciso checar casas
+#intermediárias, pq o cavalo é a unica peça que  pode pular outras peças.
+teste_mov_cavalo() {
+  declare -A cols
+  cols=([A]=1 [B]=2 [C]=3 [D]=4 [E]=5 [F]=6 [G]=7 [H]=8)
+  num_col=${cols[${MOV:1:1}]}
+  num_lin=${MOV:2:1}
+  posicao=$((64-${MOV:2:1}*8 + $num_col))
+  pos_base=""
+  mov_valido=0
+  if [[ $TURNO == "W" ]]; then
+    peca="$W_KNIGHT"
+    inimigos=${PECAS_PRETAS[@]}
+    amigos=${PECAS_BRANCAS[@]}
+  else
+    peca="$B_KNIGHT"
+    amigos=${PECAS_PRETAS[@]}
+    inimigos=${PECAS_BRANCAS[@]}
+  fi
+  existe_na_posicao "$amigos" "${TAB[$posicao]}"
+  casa_tomada=$?
+  if [[ $casa_tomada -eq 1  ||
+      "${TAB[$posicao]}" == "$B_KING" ||
+      "${TAB[$posicao]}" == "$W_KING" ]]; then
+    printf "Movimento inválido - casa destino ocupada \n"
+    return
+  fi
+  colunas_teste=(-2 -2  -1 1 2 2 -1 1)
+  linhas_teste=(1 -1 -2 -2 -1 1 2 2)
+  for ((i = 0; i < 8; i++)) do
+    cl=$(( ${colunas_teste[$i]} + $num_col))
+    ln=$(( ${linhas_teste[$i]} + $num_lin))
+    ct_col=${colunas_teste[$i]}
+    ct_lin=${linhas_teste[$i]}
+    if [[ $cl -gt 0 && $cl -lt  9 && $ln -gt 0 && $ln -lt 9 ]]; then
+     if [[ "${TAB[$(($posicao + $ct_col + $ct_lin * 8))]}" == "$peca" ]]; then
+       TAB[$(($posicao + $ct_col + $ct_lin * 8))]=""
+       TAB[$posicao]="$peca"
+       troca_turno;
+       return
+     fi
+    fi
+  done
+  printf "Movimento inválido - posicao nao e possivel \n"
+
 }
 
 #Método que analisa a movimentação da torre: a torre se move na vertical ou
@@ -196,7 +495,6 @@ teste_mov_torre() {
   existe_na_posicao "$amigos" "${TAB[$posicao]}"
   casa_tomada=$?
   mov_valido=0
-  echo $casa_tomada
   if [ $casa_tomada -eq 1 ]; then
     echo "Movimento inválido - casa destino ocupada \n"
     return
