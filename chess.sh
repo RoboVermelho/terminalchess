@@ -1,29 +1,14 @@
 #!/bin/bash
 # Script para jogos de xadrez no terminal. Apenas utilizando UTF-8 para
 # as peças. Além de receber comandos pelo terminal.
-# Passos para desenvolver: tudo.
-# 1- Gerar tabuleiro dinamicamente. --> OK
-# 2- Receber os movimentos e validá-los. O que tem várias sub etapas:
-# 2.1- Validar formato do movimento. (Expressão regular)
-# 2.2- Verificar se o movimento é possível no tabuleiro para as pessas:
-# 2.2.1- Verificar se a pessa em questão pode fazer o movimento.
-# 2.2.2- Verificar se isso resulta em uma captura.
-# 2.2.3- Verificar se o jogador não está em posição de xeque e tem que
-# obrigatóriamente defender o rei.
-# 2.2.4- Verificar se dá jogada resulta um cheque, xeque-mate ou captura de
-# peça.
-# 3- Implementar a inteligência para jogar contra o usuário.
-# 4- Encapsular o programa em um loop, com tela de introdução.
-# 5- Fazer opções de carregar um jogo para exibi-lo além de gravar as
-# jogadas para exportar.
-
-#Alguns detalhes que não conhecia sobre o shell que não conhecia: o shell
+#Alguns detalhes sobre o shell que não conhecia:
 #não dá suporte para arrays multidimensionais.
 #funções retornam apenas valores inteiros que variam de 0 a 255 (ou seja
 #apenas um byte. Porém, acessam livremente variáveis de contexto global, o
 #que me faz pensar que talvez não exista nem contexto (depois é melhor
 #testar, criando uma variável dentro de uma função e posteriormente tentar
 #acessá-la no nível mais externo.
+
 ## Peças do tabuleiro
 W_KING="\u2654"
 W_QUEEN="\u2655"
@@ -42,13 +27,8 @@ PECAS_BRANCAS=($W_KING $W_QUEEN $W_ROOK $W_KNIGHT $W_BISHOP $W_PAWN)
 PECAS_PRETAS=($B_KING $B_QUEEN $B_ROOK $B_KNIGHT $B_BISHOP $B_PAWN)
 TURNO=W #Vou utilizar essa variável para definir de quem é a vez de jogar.
 MOV="" #Captura o movimento a ser feito.
+declare -A TAB #Tabuleiro
 
-capture() {
-  local -n output="$1"
-  shift
-  output="$("$@")"
-}
-declare -A TAB
 #Reorganiza a variável global TAB com as posições iniciais do tabuleiro.
 #Não deu certo colocar a referência a um array de peças dentro da função
 #como utilizando: $1[B_ROOK], ficava aparecendo o ícone e o [B_ROOK] na
@@ -84,8 +64,7 @@ function tabuleiro_inicial() {
   TAB[57]=$W_ROOK
   TAB[58]=$W_KNIGHT
   TAB[59]=$W_BISHOP
-  #TAB[60]=$W_QUEEN
-  TAB[46]=$W_QUEEN
+  TAB[60]=$W_QUEEN
   TAB[61]=$W_KING
   TAB[62]=$W_BISHOP
   TAB[63]=$W_KNIGHT
