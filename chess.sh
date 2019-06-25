@@ -25,9 +25,12 @@ B_KNIGHT="\u265E"
 B_PAWN="\u265F"
 PECAS_BRANCAS=($W_KING $W_QUEEN $W_ROOK $W_KNIGHT $W_BISHOP $W_PAWN)
 PECAS_PRETAS=($B_KING $B_QUEEN $B_ROOK $B_KNIGHT $B_BISHOP $B_PAWN)
-
+COLS=([A]=1 [B]=2 [C]=3 [D]=4 [E]=5 [F]=6 [G]=7 [H]=8)
 TURNO=W #Vou utilizar essa variável para definir de quem é a vez de jogar.
 MOV="" #Captura o movimento a ser feito.
+POSICAO="" #Armazena uma posição do tabuleiro no formato [A-H][1-8]
+ATAQUE_AO_REI=() #Array que armazena peças atacantes ao rei no formato
+#numérico
 declare -A TAB #Tabuleiro
 
 #Reorganiza a variável global TAB com as posições iniciais do tabuleiro.
@@ -277,11 +280,134 @@ teste_mov_rei() {
   fi
 }
 
+#Verifica se o rei do turno atual sofreu xeque-mate, para isso, a condição
+#necessária é que: a posição está em xeque, o rei não pode se mover para
+#nenhuma das casas possíveis, e que nenhuma outra peça aliada pode bloquear
+#o xeque. Para verificar se uma peça tem a possibilidade de bloquear o
+#ataque, primeiro armazeno todas as casas de trajetoria (caminhos de torre,
+#bispo e dama, casas dos cavalos e dos peões), depois verifico se elas são
+#acessiveis pelo jogador ameaçado. Se uma das casas é acessível, verifico se
+#mesmo depois da ação a posição do rei continua em xeque. Se mesmo depois de
+#todos os testes a posição continua em xeque, então é xeque-mate.
+#Parametros: $1 -> posição do rei
+#Retorno: 1 se xeque-mate 0 se não.
+xeque_mate() {
+  local xeque=0
+  local pos_rei=$1
+  posicao_em_xeque $pos_rei
+  xeque=$?
+
+  if [[ $xeque -eq 0 ]]; then
+    return 0
+  fi
+
+  movimentos_rei $pos_rei #lista de movimentos do rei.
+  if [[ $? -gt 0 ]]; then
+    return 0
+  fi
+  #Carrega todas as casas que estão atacando o rei no array ATAQUE_AO_REI
+  carrega_atacantes_rei $pos_rei
+
+  #Verifica se uma das peças consegue bloquear o mate bloqueando um dos
+  #atacantes, se depois de uma peça ser bloqueada o mate continua, então o
+  #bloqueio não é efetivo.
+  verifica_defesa_rei $pos_rei
+  defesa_pos=$?
+
+  if [[ $defesa_pos -eq 1 ]]; then
+    return 0
+  fi
+
+  return 1 #O rei está em mate, não é possível movê-lo e não há como
+  #bloquear as ameaças de forma efetiva, xeque-mate.
+}
+
+#Lista todos os atacantes de ATAQUE_AO_REI, e verifica de cada um deles se
+#é possivel bloquear, se for possível, verifica se a posição continua em
+#xeque mesmo após o bloqueio, se a mesma situação acontece com todas as
+#peças, então não é possível defender o rei.
+#Parametros:
+#1 - Posição do rei, formato [A-H][1-8]
+#Retorno:
+#1 se a defesa é possivel, 0 se não
+#TODO: Continuar o método daqui.
+verifica_defesa_rei() {
+  local pc_atq="" #Armazena o tipo de peça que está atacando.
+  for i in "${ATAQUE_AO_REI[@]}"
+  do
+    pc_atq=${TAB[$i]}
+  done
+
+}
+
+#Carrega todas as posições que estão atacando a casa indicada no array
+#ATAQUE_AO_REI
+#Parâmetros:
+#1 - Casa posição do rei no formato [A-H][1-8]
+carrega_atacantes_rei() {
+  ATAQUE_AO_REI=()
+  declare pos_rei=$1
+  teste_mov_dama $pos_rei
+  teste_mov_bispo $pos_rei
+  teste_mov_cavalo $pos_rei
+  teste_mov_torre $pos_rei
+  teste_mov_peao $pos_rei
+}
+
+#Verifica quais são os movimentos possíveis do rei, baseado em sua posição
+#atual, verificando casas disponíveis que não estão em xeque.
+#Parametros:
+#1 - Posição atual do rei no formato [A-G][1-8]
+#Retorno:
+#1 - Quantidade de casas possíveis para o rei se mover.
+movimentos_rei() {
+  local pos_rei=$1
+  local num_movs=0
+  local pos_col=$COLS[${pos_rei:0:1}]
+  local pos_lin=${pos_rei:1:1}
+  local pos_num=0 #Posicao numerica à ser calculada.
+  local pos_ref="" #Posicao referencial que será calculada
+  local pos_xeque=0
+
+  local itr_col=(-1  0  1 -1 1 -1 0 1)
+  local itr_lin=(-1 -1 -1  0 0  1 1 1)
+
+  for ((i=0; i < 8; i++)) do
+    if [[ $(( $pos_col + ${itr_col[$i]})) -lt 9 ]] &&
+       [[ $(( $pos_col + ${itr_col[$i]})) -gt 0 ]] &&
+       [[ $(( $pos_lin + ${itr_lin[$i]})) -gt 9 ]] &&
+       [[ $(( $pos_lin + ${itr_lin[$i]})) -gt 0 ]]; then
+    pos_num=$(( ($pos_lin + ${itr_lin[$i]}) * 8 + $pos_col +
+    ${itr_col[$i]} ))
+    referencia_posicao_numerica $pos_num;
+    posicao_em_xeque $POSICAO;
+    pos_xeque=$?
+
+    if [[ $pos_xeque -eq 0 ]]; then
+      num_movs=$(( $num_movs+ 1 ))
+    fi
+  fi
+  done
+  return $num_movs
+}
+
+#Recebe uma posição numérica do tabuleiro - variando entre 1 e 64 - e
+#carrega a variavel global POSICAO com a referência no padrão [A-H][1-8].
+#Parâmetros:
+#$1 -> Valor numérico entre 1 e 64.
+referencia_posicao_numerica() {
+  local cols=("A" "B" "C" "D" "E" "F" "G" "H")
+  local pos_num=$1
+  local pos_lin=$(( $pos_num / 8 ))
+  local pos_num_col=$(( $pos_num % 8 ))
+  POSICAO="${COLS[$pos_num_col]}" + "$pos_num"
+}
+
 #Verifica se uma posicao do tabuleiro esta em xeque.
 #Posso utilizar todos os testes das outras peças, mas para isso vou precisar
 #refatorar o código, para que fique mais modular. Simplesmente, vou testar a
 #movimentação de cada peça para a casa pretendida.
-#Parametros: $1 -> casa que vai ser verificada.
+#Parametros: $1 -> posição à ser verificada no formato [A-G][1-8]
 posicao_em_xeque() {
   local posicao="$1"
   printf "Posicao: $posicao \n"
@@ -292,7 +418,6 @@ posicao_em_xeque() {
     troca_turno;
     return 1
   fi
-  printf "Teste xeque dama terminado \n"
 
   teste_mov_torre "$1"
   pos_em_xeque=$?
@@ -301,7 +426,6 @@ posicao_em_xeque() {
     return 1
   fi
 
-  printf "Teste xeque torre terminado \n"
   teste_mov_cavalo "$1"
   pos_em_xeque=$?
   if [[ $pos_em_xeque -gt 0 ]]; then
@@ -309,7 +433,6 @@ posicao_em_xeque() {
     return 1
   fi
 
-  printf "Teste xeque cavalo terminado \n"
   teste_mov_bispo $1
   pos_em_xeque=$?
   if [[ $pos_em_xeque -gt 0 ]]; then
@@ -317,7 +440,6 @@ posicao_em_xeque() {
     return 1
   fi
 
-  printf "Teste xeque bispo terminado \n"
   local mv=$1
   teste_mov_peao "${mv:1:2}"
   pos_em_xeque=$?
@@ -325,7 +447,6 @@ posicao_em_xeque() {
     troca_turno;
     return 1
   fi
-  printf "Teste xeque peao terminado \n"
 
   troca_turno;
   return 0
@@ -378,7 +499,6 @@ teste_mov_dama() {
   fi
 
   #Movimento horizontal ->
-  echo "teste horizontal \n"
   local itr_tst=$(($num_col+1))
   local pos_tst=$(($posicao + $itr_tst))
   while [ $itr_tst -lt 9 ]; do
@@ -395,7 +515,6 @@ teste_mov_dama() {
   done
 
   #Movimento horizontal <--
-  echo "teste horizontal \n"
   if [[ $mov_valido -eq 0 ]]; then
     itr_tst=$(($num_col-1))
     while [ $itr_tst -gt 0 ]; do
@@ -413,7 +532,6 @@ teste_mov_dama() {
   fi
 
   #Teste de movimentos - Vertical
-  echo "teste vertical descendente\n"
   if [[ $mov_valido -eq 0 ]]; then
     pos_tst=$(( $posicao + 8))
     while [ $pos_tst -lt 65 ]; do
@@ -429,7 +547,6 @@ teste_mov_dama() {
     done
   fi
 
-  echo "teste vertical ascendente\n"
   if [[ $mov_valido -eq 0 ]]; then
    pos_tst=$(( $posicao - 8))
    while [ $pos_tst > 0 ]; do
@@ -446,7 +563,6 @@ teste_mov_dama() {
   fi
 
   #Teste de diagonais
-  echo "comeco teste diagonais \n"
   if [[ $mov_valido -eq 0 ]]; then
     local diag_col=(-1 -1 1  1)
     local diag_lin=(-1  1 1 -1)
@@ -477,9 +593,9 @@ teste_mov_dama() {
         fi
     done
   fi
-  echo "fim teste diagonais \n"
 
   if [[ $mov_valido -eq 1 ]]; then
+    ATAQUE_AO_REI+=($pos_base)
     return $pos_base
   else
     return 0
@@ -526,12 +642,15 @@ teste_mov_cavalo() {
     if [[ $cl -gt 0 && $cl -lt  9 && $ln -gt 0 && $ln -lt 9 ]]; then
      pos_base=$(($posicao + $ct_col + $ct_lin * 8))
      if [[ "${TAB[$pos_base]}" == "$peca" ]]; then
-       return $pos_base
+       ATAQUE_AO_REI+=($pos_base)
+       mov_valido=$pos_base
      fi
     fi
   done
-  printf "Movimento inválido - posicao nao e possivel \n"
-  return 0
+  if [[ $mov_valido -eq 0 ]]; then
+    printf "Movimento inválido - posicao nao e possivel \n"
+  fi
+  return $mov_valido
 }
 
 #Método que analisa a movimentação da torre: a torre se move na vertical ou
@@ -572,16 +691,16 @@ teste_mov_torre() {
     if [[ "${TAB[$pol]}" == "" ]]; then
       teste_col=$(($teste_col-1))
     elif [[ "${TAB[$pol]}" == "$peca" ]]; then
+      ATAQUE_AO_REI+=($pol)
       mov_valido=1
-      pos_base=$(($pol))
+      pos_base=$pol
       break
     else
       break
     fi
   done
 
-  echo $num_lin
-  if [[ $mov_valido -eq 0 ]]; then
+  #Continua fazendo testes para ver se mais de uma casa pode atacar.
     teste_col=$(($num_col+1))
     while [ $teste_col -lt 9 ];
     do
@@ -589,14 +708,14 @@ teste_mov_torre() {
       if [[ "${TAB[$pol]}" == "" ]]; then
         teste_col=$(($teste_col+1))
       elif [[ "${TAB[$pol]}" == "$peca" ]]; then
+        ATAQUE_AO_REI+=($pol)
         mov_valido=1
-        pos_base=$(($pol))
+        pos_base=$pol
         break
       else #movimento invalido, encontrou uma peça aliada no caminho
         break
       fi
     done
-  fi
 
   if [[ $mov_valido -eq 0 ]]; then
     teste_lin=$(($num_lin+1))
@@ -606,8 +725,9 @@ teste_mov_torre() {
       if [[ "${TAB[$pol]}" == "" ]]; then
         teste_lin=$(($teste_lin+1))
       elif [[ "${TAB[$pol]}" == "$peca" ]]; then
+        ATAQUE_AO_REI+=($pol)
         mov_valido=1
-        pos_base=$(($pol))
+        pos_base=$pol
         break
       else #movimento invalido, encontrou uma peça aliada no caminho
         break
@@ -623,8 +743,9 @@ teste_mov_torre() {
       if [[ "${TAB[$pol]}" == "" ]]; then
         teste_lin=$(($teste_lin-1))
       elif [[ "${TAB[$pol]}" == "$peca" ]]; then
+        ATAQUE_AO_REI+=($pol)
         mov_valido=1
-        pos_base=$(($pol))
+        pos_base=$pol
         break
       else #movimento invalido, encontrou uma peça aliada no caminho
         break
@@ -720,6 +841,7 @@ teste_mov_bispo() {
   fi
 
   if [ $mov_valido == 1 ]; then
+    ATAQUE_AO_REI+=($mov_valido)
     return $teste
   else
     return 0
@@ -757,29 +879,22 @@ teste_mov_peao() {
      [ "$(($posicao + $saida_dupla))" == "$pos_inic" ]  &&
      [ "${TAB[$posicao]}" == "" ]  &&
        [ "${TAB[$(($posicao + $saida))]}" == "" ]; then
-    #TAB[$(($posicao + $saida_dupla))]=""
     pos_ret=$(($posicao + $saida_dupla))
-    #TAB[$(($posicao))]="$peca"
-    #troca_turno;
   #Movimento de uma casa.
   elif [ "${TAB[$(($posicao + $saida))]}" == $peca ] &&
        [ "${TAB[$posicao]}" == "" ]; then
-    #TAB[$(($posicao + $saida))]=""
     pos_ret=$(($posicao + $saida))
-    #TAB[$(($posicao))]="$peca"
-    #troca_turno;
   #Tomada de peça.
   elif [ $casa_tomada -eq 1 ]; then
+
     if [ "${TAB[$(($posicao + $saida + 1))]}" == $peca ]; then
-      #TAB[$(($posicao + $saida + 1))]=""
       pos_ret=$(($posicao + $saida + 1))
-      #TAB[$(($posicao))]="$peca"
-      #troca_turno;
-    elif [ "${TAB[$(($posicao + $saida - 1))]}" == $peca ]; then
-      #TAB[$(($posicao + $saida - 1))]=""
+      ATAQUE_AO_REI+=($pos_ret)
+    fi
+
+    if [ "${TAB[$(($posicao + $saida - 1))]}" == $peca ]; then
       pos_ret=$(($posicao + $saida + 1))
-      #TAB[$(($posicao))]="$peca"
-      #troca_turno;
+      ATAQUE_AO_REI+=($pos_ret)
     fi
   fi
   return $pos_ret
